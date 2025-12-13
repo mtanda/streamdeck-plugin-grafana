@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "UUID": "dev.mtanda.streamdeck.grafana",
+  "Name": "Grafana Stream Deck Plugin",
+  "Author": "Mitsuhiro Tanda",
+  "URL": "https://github.com/mtanda/streamdeck-plugin-grafana",
+  "Version": "1.0.0.0",
+  "Icon": "ui/grafana",
+  "CodePath": "grafana",
+  "CodePathWin": "grafana.exe",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.6"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "10.15"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Actions": [
+    {
+      "Name": "Grafana Stat Action",
+      "UUID": "dev.mtanda.streamdeck.grafana.stat",
+      "Icon": "ui/stat_plugin",
+      "PropertyInspectorPath": "ui/grafana_property_inspector.html",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "ShowTitle": true,
+          "TitleAlignment": "middle",
+          "TitleColor": "#ffffff",
+          "FontSize": 24,
+          "Image": "ui/stat_state"
+        }
+      ]
+    }
+  ]
+}
