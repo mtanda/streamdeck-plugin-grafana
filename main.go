@@ -9,6 +9,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/FlowingSPDG/streamdeck"
@@ -23,6 +25,7 @@ type Settings struct {
 	PrometheusUsername string `json:"prometheusUsername,omitempty"`
 	PrometheusPassword string `json:"prometheusPassword,omitempty"`
 	PrometheusQuery    string `json:"prometheusQuery,omitempty"`
+	Threshold          string `json:"threshold,omitempty"`
 }
 
 const (
@@ -146,7 +149,8 @@ func updateDisplay(ctx context.Context, client *streamdeck.Client, settings Sett
 		return fmt.Errorf("error querying prometheus: %w", err)
 	}
 
-	img, err := streamdeck.Image(background(color.RGBA{0xf4, 0x81, 0x18, 0xff}))
+	backgroundColor := getBackgroundColor(float64(result.Value), settings)
+	img, err := streamdeck.Image(background(backgroundColor))
 	if err != nil {
 		return fmt.Errorf("error creating image: %w", err)
 	}
@@ -161,6 +165,38 @@ func updateDisplay(ctx context.Context, client *streamdeck.Client, settings Sett
 	}
 
 	return nil
+}
+
+func getBackgroundColor(value float64, settings Settings) color.RGBA {
+	greenColor := color.RGBA{0x6a, 0xb7, 0x4b, 0xff}
+	orangeColor := color.RGBA{0xf4, 0x81, 0x18, 0xff}
+	redColor := color.RGBA{0xe5, 0x5a, 0x4e, 0xff}
+
+	if settings.Threshold != "" {
+		thresholds := strings.Split(settings.Threshold, ",")
+		if len(thresholds) >= 2 {
+			warnStr := strings.TrimSpace(thresholds[0])
+			if warnThreshold, err := strconv.ParseFloat(warnStr, 64); err == nil {
+				critStr := strings.TrimSpace(thresholds[1])
+				if critThreshold, err := strconv.ParseFloat(critStr, 64); err == nil {
+					if value >= critThreshold {
+						return redColor
+					} else if value >= warnThreshold {
+						return orangeColor
+					}
+				}
+			}
+		} else if len(thresholds) == 1 {
+			warnStr := strings.TrimSpace(thresholds[0])
+			if warnThreshold, err := strconv.ParseFloat(warnStr, 64); err == nil {
+				if value >= warnThreshold {
+					return orangeColor
+				}
+			}
+		}
+	}
+
+	return greenColor
 }
 
 func queryPrometheus(ctx context.Context, endpoint, username, password, query string) (*model.Sample, error) {
