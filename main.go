@@ -109,46 +109,58 @@ func setup(client *streamdeck.Client) {
 
 func statMonitor(ctx context.Context, client *streamdeck.Client, settingsChan <-chan Settings) {
 	var settings Settings
+	ticker := time.NewTicker(time.Second * defaultPrometheusInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case s := <-settingsChan:
 			log.Println("Updated settings")
 			settings = s
-		case <-time.Tick(time.Second * defaultPrometheusInterval):
+			go func() {
+				if err := updateDisplay(ctx, client, settings); err != nil {
+					log.Printf("error updating display: %v\n", err)
+				}
+			}()
+		case <-ticker.C:
 			log.Println("Update value")
-			result, err := queryPrometheus(
-				ctx,
-				settings.PrometheusEndpoint,
-				settings.PrometheusUsername,
-				settings.PrometheusPassword,
-				settings.PrometheusQuery,
-			)
-			if err != nil {
-				log.Printf("error querying prometheus: %v\n", err)
-				continue
-			}
-
-			img, err := streamdeck.Image(background(color.RGBA{0xf4, 0x81, 0x18, 0xff}))
-			if err != nil {
-				fmt.Printf("error creating image: %v\n", err)
-				continue
-			}
-
-			if err := client.SetImage(ctx, img, streamdeck.HardwareAndSoftware); err != nil {
-				fmt.Printf("error setting image: %v\n", err)
-				continue
-			}
-
-			title := fmt.Sprintf("%.1f", result.Value)
-			if err := client.SetTitle(ctx, title, streamdeck.HardwareAndSoftware); err != nil {
-				log.Printf("error setting title: %v\n", err)
-				continue
+			if err := updateDisplay(ctx, client, settings); err != nil {
+				log.Printf("error updating display: %v\n", err)
 			}
 		case <-ctx.Done():
 			log.Println("Stop monitor")
 			return
 		}
 	}
+}
+
+func updateDisplay(ctx context.Context, client *streamdeck.Client, settings Settings) error {
+	result, err := queryPrometheus(
+		ctx,
+		settings.PrometheusEndpoint,
+		settings.PrometheusUsername,
+		settings.PrometheusPassword,
+		settings.PrometheusQuery,
+	)
+	if err != nil {
+		return fmt.Errorf("error querying prometheus: %w", err)
+	}
+
+	img, err := streamdeck.Image(background(color.RGBA{0xf4, 0x81, 0x18, 0xff}))
+	if err != nil {
+		return fmt.Errorf("error creating image: %w", err)
+	}
+
+	if err := client.SetImage(ctx, img, streamdeck.HardwareAndSoftware); err != nil {
+		return fmt.Errorf("error setting image: %w", err)
+	}
+
+	title := fmt.Sprintf("%.1f", result.Value)
+	if err := client.SetTitle(ctx, title, streamdeck.HardwareAndSoftware); err != nil {
+		return fmt.Errorf("error setting title: %w", err)
+	}
+
+	return nil
 }
 
 func queryPrometheus(ctx context.Context, endpoint, username, password, query string) (*model.Sample, error) {
