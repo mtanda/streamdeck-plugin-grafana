@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FlowingSPDG/streamdeck"
@@ -26,6 +27,10 @@ type Settings struct {
 	PrometheusPassword string `json:"prometheusPassword,omitempty"`
 	PrometheusQuery    string `json:"prometheusQuery,omitempty"`
 	Threshold          string `json:"threshold,omitempty"`
+}
+
+func coordsKey(c streamdeck.Coordinates) string {
+	return fmt.Sprintf("%d:%d", c.Row, c.Column)
 }
 
 const (
@@ -73,38 +78,66 @@ func setup(client *streamdeck.Client) {
 	actionName := "dev.mtanda.streamdeck.grafana.stat"
 	action := client.Action(actionName)
 
-	settingsChan := make(chan Settings, 10)
-	var currentCancel context.CancelFunc
+	type monitor struct {
+		cancel      context.CancelFunc
+		settingsChan chan Settings
+	}
+	monitors := make(map[string]*monitor)
+	var mu sync.Mutex
 
 	streamdeck.RegisterTypedHandler(action, streamdeck.WillAppear, func(ctx context.Context, client *streamdeck.Client, p streamdeck.WillAppearPayload[Settings]) error {
-		log.Println("WillAppear")
+		log.Println("WillAppear", p.Coordinates)
 
-		// If there is an existing monitor, cancel it
-		if currentCancel != nil {
-			currentCancel()
+		key := coordsKey(p.Coordinates)
+
+		mu.Lock()
+		if m, ok := monitors[key]; ok {
+			m.cancel()
+			close(m.settingsChan)
+			delete(monitors, key)
 		}
 
-		settingsChan <- p.Settings
+		settingsChan := make(chan Settings, 10)
+		// send initial settings (non-blocking in case monitor not started yet)
+		select {
+		case settingsChan <- p.Settings:
+		default:
+		}
 		monitorCtx, cancel := context.WithCancel(ctx)
-		currentCancel = cancel
+		monitors[key] = &monitor{cancel: cancel, settingsChan: settingsChan}
+		mu.Unlock()
+
 		go statMonitor(monitorCtx, client, settingsChan)
 
 		return nil
 	})
 
 	streamdeck.RegisterTypedHandler(action, streamdeck.DidReceiveSettings, func(ctx context.Context, client *streamdeck.Client, p streamdeck.DidReceiveSettingsPayload[Settings]) error {
-		log.Println("DidReceiveSettings")
-		settingsChan <- p.Settings
+	log.Println("DidReceiveSettings", p.Coordinates)
+	key := coordsKey(p.Coordinates)
+		mu.Lock()
+		if m, ok := monitors[key]; ok {
+			select {
+			case m.settingsChan <- p.Settings:
+			default:
+			}
+		} else {
+			log.Println("DidReceiveSettings: no monitor for", key)
+		}
+		mu.Unlock()
 		return nil
 	})
 
 	streamdeck.RegisterTypedHandler(action, streamdeck.WillDisappear, func(ctx context.Context, client *streamdeck.Client, p streamdeck.WillDisappearPayload[Settings]) error {
-		log.Println("WillDisappear")
-
-		if currentCancel != nil {
-			currentCancel()
-			currentCancel = nil
+	log.Println("WillDisappear", p.Coordinates)
+	key := coordsKey(p.Coordinates)
+		mu.Lock()
+		if m, ok := monitors[key]; ok {
+			m.cancel()
+			close(m.settingsChan)
+			delete(monitors, key)
 		}
+		mu.Unlock()
 
 		return nil
 	})
